@@ -1,0 +1,10 @@
+{
+    "@berstearns":{
+        "id":"berstearns",
+        "type":"user"
+    },
+    "@narendramodi":{
+        "id":"narendramodi",
+        "type":"user"
+    }
+}
