@@ -1,2 +1,4 @@
 pythonenv/
 chromedriver
+.DS_Store
+seeds/instagram_post_details.json

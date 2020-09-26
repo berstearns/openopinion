@@ -3,6 +3,7 @@ window.comments= [];
 window.waiting_time = 500;//ms
 window.iteration = 0;
 function finish() {
+    alert("123")
     return window.comments;
 }
 var c = async () => {
