@@ -1,10 +1,26 @@
 {
-    "@berstearns":{
-        "id":"berstearns",
-        "type":"user"
+    "@rafabrandaopro":{
+        "id": "rafabrandaopro",
+        "type":"user",
+        "post_where_referenced": "",
+        "last_scraped_timestamp": ""
+    },
+    "@bolsonarosp":{
+        "id": "bolsonarosp",
+        "type":"user",
+        "post_where_referenced": "",
+        "last_scraped_timestamp": ""
+    },
+    "@jairmessiasbolsonaro":{
+        "id":"jairmessiasbolsonaro",
+        "type":"user",
+        "post_where_referenced": "",
+        "last_scraped_timestamp": ""
     },
     "@narendramodi":{
         "id":"narendramodi",
-        "type":"user"
+        "type":"user",
+        "post_where_referenced": "",
+        "last_scraped_timestamp": ""
     }
 }
