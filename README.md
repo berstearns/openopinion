@@ -4,6 +4,7 @@ Sentiment analysis of influential instagram pages
 
 ## Quick start
 1- clone repo
+
     ```git clone https://github.com/berstearns/openopinion.git {repo_name}```
 
     2- move to repo foler
