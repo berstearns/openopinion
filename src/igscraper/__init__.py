@@ -1,1 +1,1 @@
-from igscraper.IG_scraper import IGScraper
+from igscraper.IGScraper import IGScraper

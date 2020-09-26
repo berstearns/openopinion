@@ -1,14 +1,16 @@
-# PREAMBLE
-
 import re
 import time
 from datetime import datetime
 import json
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 from os.path import dirname, join, abspath, exists
 import os
 import itertools
+import pprint
+import ast
 
 
 class IGScraper:
@@ -31,108 +33,140 @@ class IGScraper:
         self.driver.set_window_size(980, 573)
 
         self.pages_filepath = "seeds/instagram_pages.json"
-        self.pages = json.load(open(self.pages_filepath))  if exists(self.pages_filepath) else {}
+        self.pages = ast.literal_eval(open(self.pages_filepath).read())  if exists(self.pages_filepath) else {}
         self.posts_filepath = "seeds/instagram_post_details.json"
-        self.posts = json.load(open(self.posts_filepath)) if exists(self.posts_filepath) else {}
-        self.post_count = int(1)
-        self.max_hours = float(0.1)
+        self.posts = ast.literal_eval(open(self.posts_filepath).read()) if exists(self.posts_filepath) else {}
 
 
     def start_scraping(self):
         self.start_time = time.time()
-        for page_reference, page_dict in self.pages.items():
-            if ((time.time() - self.start_time) / 3600) < self.max_hours:
-                id_ = page_dict["id"]
-                page_type = page_dict["type"]
-                new_posts, mentions = list(zip(
+        pages_before_scraping = self.pages.copy()
+        for page_reference, page_dict in pages_before_scraping.items():
+            self.pages[page_reference]["last_scraped_timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S") 
+            id_ = page_dict["id"]
+            page_type = page_dict["type"]
+            try:
+                new_posts, new_pages = list(zip(
                       *[self.process_link(link,id_) 
-                          for link in self.recent_post_links_from_user(id_, self.post_count)
+                          for link in self.get_recent_post_links(id_, page_type, n=3)
                           if not self.posts.get(link, False)]
                 )) 
-        self.posts.update(new_posts)
-        self.driver.quit()
+            except Exception as E:
+                new_posts, new_pages = {}, {}
+                print("!!!!"*1000)
+                print(E)
 
-    def recent_post_links_from_user(self, username, post_count):
-        url = "https://www.instagram.com/" + username + "/"
+            for post in new_posts:
+               print(post['n_comments'])
+               self.posts.update({post["post_link"]:post})
+            self.write_posts()
+        #self.driver.quit()
+
+    def get_recent_post_links(self, page_id, type_, n=-1):
+        url = "https://www.instagram.com/explore/tags/" + page_id + "/" \
+            if type_ == "hashtag" \
+            else "https://www.instagram.com/" + page_id + "/" 
         self.driver.get(url)
-        post = 'https://www.instagram.com/p/'
-        number_of_posts = len(self.driver.find_elements_by_class_name('u7YqG'))
-        post_links = []
+        post_links_to_scrape = []
+
         if 'This Account is Private' not in self.driver.page_source and \
                 "Sorry, this page isn't available." not in self.driver.page_source:
-            if number_of_posts < self.post_count:
-                self.post_count = number_of_posts
-            while len(post_links) < self.post_count:
-                links = [a.get_attribute('href') for a in self.driver.find_elements_by_tag_name('a')]
-                for link in links:
-                    if post in link and link not in post_links:
-                        post_links.append(link)
-                scroll_down = "window.scrollTo(0, document.body.scrollHeight);"
-                self.driver.execute_script(scroll_down)
-            else:
-                self.driver.stop_client()
-                return post_links[:self.post_count]
-        self.driver.stop_client()
-        return post_links[:self.post_count]
+            scroll_down = "window.scrollTo(0, document.body.scrollHeight);"
+            self.driver.execute_script(scroll_down)
+            time.sleep(5)
+            self.driver.execute_script(scroll_down)
+            time.sleep(5)
+            self.driver.execute_script(scroll_down)
+            post_links = self.driver.execute_script(f'return [...document.querySelectorAll("a[href*=\'/p/\'")].map(function (l) {{ return l.getAttribute("href")}})')
+            for post_link in post_links:
+                if not self.posts.get(post_link, False):
+                    full_url = f'https://instagram.com{post_link}'
+                    post_links_to_scrape.append(full_url)
+        return post_links_to_scrape[:n]
 
 
     def insta_link_details_by_class(self, url, page_id):
         with open(self.comment_js) as collect_script:
             code = collect_script.read()
         self.driver.get(url)
-        self.driver.execute_script(code)
+        post_timestamp_str = self.driver.execute_script(f"return  document.querySelector('time._1o9PC.Nzb55')['dateTime']")
+        post_timestamp =  datetime.strptime(post_timestamp_str,"%Y-%m-%dT%H:%M:%S.000Z")
+
+        description = self.driver.execute_script(''' window.description = document.querySelector(\'.eo2As .gElp9.PpGvg\')
+                if(window.description){
+                    return {
+                        "comment": window.description.innerText,
+                        "html": window.description.innerHTML}
+                }
+                else {
+                    return {
+                    }
+                }
+                ''')
+
+        self.driver.execute_script(code) # _async
+        element = WebDriverWait(self.driver, 99999999).until(
+                        EC.alert_is_present()
+                )
+        print("*"*1000)
+        self.driver.switch_to_alert().accept()
         comments = self.driver.execute_script('return window.comments')
-        description = self.driver.execute_script(f'document.querySelectorAll(\'.eo2As .gElp9.PpGvg\')')
         if description:
-            description, comments = comments
+            comments = comments[1:]
+            hashtags, mentions = self.find_references(description['comment'], reference_type="hashtag"),\
+                                 self.find_references(description['comment'], reference_type="user")
+        else:
+            hashtags, mentions =  [], []
+
+        for comment in comments:
+            hashtags += self.find_references(comment['comment'], reference_type="hashtag")
+            mentions += self.find_references(comment['comment'], reference_type="user")
+
         page = self.driver.page_source
         post_details = dict(page_id=page_id, post_link=url, comments=comments, description=description,
-                            hashtags='', mentions='', scrape_timestamp=str(datetime.now()),post_timestamp='')
+                            n_comments=len(comments),
+                            hashtags=hashtags, mentions=mentions,
+                            scrape_timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),post_timestamp=post_timestamp.strftime("%Y-%m-%d %H:%M:%S"))
         return post_details
 
 
     def process_link(self, post_link, page_id):
         new_post_details = self.insta_link_details_by_class(post_link, page_id)
-        exit()
-        flattened_mentions = [] 
-        for mention in new_post_details['mentions'] + new_post_details['hashtags']:
-            if isinstance(mention,list):
-                for mention_ in mention:
-                    flattened_mentions.append(mention_)
-            else: 
-                flattened_mentions.append(mention)
-        pages = create_pages_dict(flattened_mentions, new_post_details)
-        return new_post_details, pages
+        referenced_pages = {}
+        referenced_pages.update(
+                self.create_pages_dict(new_post_details['mentions'],
+                    new_post_details, pages_type="user")
+                )
+        referenced_pages.update(
+                self.create_pages_dict(new_post_details['hashtags'],
+                    new_post_details, pages_type="hashtag")
+                )
+        return new_post_details, referenced_pages
 
-    def find_hashtags(comment):
-        hashtags = re.findall(r'#\w+', comment, re.UNICODE)
-        if (len(hashtags) > 1) & (len(hashtags) != 1):
-            return hashtags
-        elif len(hashtags) == 1:
-            make_hashtag_list = [hashtags[0]]
-            return make_hashtag_list
+    def find_references(self, comment, reference_type):
+        reference_char = "@" if reference_type == "user" else "#"
+        references = re.findall(f'{reference_char}\w+', comment, re.UNICODE)
+        if len(references) > 1:
+            return references 
+        elif len(references) == 1:
+            references = [references[0]]
+            return references
         else:
             return []
 
-
-    def find_mentions(comment):
-        mentions = re.findall(r'@\w+', comment, re.UNICODE)
-        if (len(mentions) > 1) & (len(mentions) != 1):
-            return mentions
-        elif len(mentions) == 1:
-            make_mention_list = [mentions[0]]
-            return make_mention_list
-        else:
-            return []
-
-
-    def create_pages_dict(pages_list, post_info):
+    def create_pages_dict(self, pages_list, post_info, pages_type):
         pages_info = {} 
         for page_reference in pages_list:
             page_dict = {
                     "id":page_reference[1:],
-                    "last_collected_timestamp": None
+                    "type": pages_type,
+                    "post_where_referenced": post_info["post_link"],
+                    "last_scraped_timestamp": ""
                     }
             pages_info[page_reference] = page_dict
         return pages_info
 
+    def write_posts(self):
+        if self.posts:
+            with open(self.posts_filepath,"w") as posts_file: 
+                    pprint.pprint(self.posts, stream=posts_file)
